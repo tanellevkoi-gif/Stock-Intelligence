@@ -1,0 +1,13 @@
+{
+  "name": "whale-view",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "node dev-server.mjs",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "type": "module"
+}
