@@ -22,7 +22,7 @@ export function normalizeChart(ticker, payload) {
   const history = rows.slice(-60).map(row => ({date:new Date(row.time*1000).toISOString().slice(0,10), close:row.close, high:row.high, low:row.low, volume:row.volume}));
   const structure = levels(rows, price);
   return {
-    ticker, history, structure, latest: {close:price, date:new Date(quoteTime*1000).toISOString().slice(0,10), high:finite(meta.regularMarketDayHigh) ?? last.high, low:finite(meta.regularMarketDayLow) ?? last.low, volume:finite(meta.regularMarketVolume) ?? last.volume},
+    ticker, history, structure, historyTimestamp:history.at(-1)?.date ?? null, technicalMethod:'Eelmise 20 ja kuni 60 kauplemispäeva kõrgeimad ja madalaimad hinnad', latest: {close:price, date:new Date(quoteTime*1000).toISOString().slice(0,10), high:finite(meta.regularMarketDayHigh) ?? last.high, low:finite(meta.regularMarketDayLow) ?? last.low, volume:finite(meta.regularMarketVolume) ?? last.volume},
     previousClose, changePct:(price/previousClose-1)*100,
     volumeRatio:average && (finite(meta.regularMarketVolume) ?? last.volume) !== null ? (finite(meta.regularMarketVolume) ?? last.volume)/average : null,
     range20:lows.length === 20 && highs.length === 20 ? {low:Math.min(...lows),high:Math.max(...highs)} : null,

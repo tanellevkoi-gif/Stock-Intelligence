@@ -9,19 +9,19 @@ export function normalizeMacro(symbol, payload) {
   const time = meta?.regularMarketTime;
   if (![price,previous,time].every(v => typeof v === 'number' && Number.isFinite(v)) || previous <= 0) throw Error('Incomplete index');
   return {value:price, changePct:(price/previous-1)*100,
-    timestamp:new Date(time*1000).toISOString(), source:'Yahoo Finance',
+    timestamp:new Date(time*1000).toISOString(), retrievedAt:new Date().toISOString(), source:'Yahoo Finance',
     sourceUrl:`https://finance.yahoo.com/quote/${encodeURIComponent(SYMBOLS[symbol])}/`};
 }
 async function retrieve(symbol) {
-  for (const host of ['query1.finance.yahoo.com','query2.finance.yahoo.com']) {
-    try {
-      const response = await fetch(`https://${host}/v8/finance/chart/${encodeURIComponent(SYMBOLS[symbol])}?range=5d&interval=1d`,
-        {signal:AbortSignal.timeout(8000),headers:{'User-Agent':'Mozilla/5.0','Accept':'application/json'}});
-      if (!response.ok) continue;
-      return normalizeMacro(symbol,await response.json());
-    } catch { /* try secondary host */ }
-  }
-  return null;
+  // Query both public chart hosts concurrently: one host can throttle a serverless IP.
+  const hosts = ['query1.finance.yahoo.com','query2.finance.yahoo.com'];
+  const attempts = hosts.map(async host => {
+    const response = await fetch(`https://${host}/v8/finance/chart/${encodeURIComponent(SYMBOLS[symbol])}?range=5d&interval=1d`,
+      {signal:AbortSignal.timeout(7000),headers:{'User-Agent':'Mozilla/5.0','Accept':'application/json'}});
+    if (!response.ok) throw Error(`Provider HTTP ${response.status}`);
+    return normalizeMacro(symbol,await response.json());
+  });
+  try { return await Promise.any(attempts); } catch { return null; }
 }
 export default async function handler(req,res) {
   if (cache.data && Date.now()-cache.fetched < 120000) return res.status(200).json(cache.data);
