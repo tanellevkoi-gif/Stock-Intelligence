@@ -1,4 +1,4 @@
-const TICKERS = new Set(['IREN', 'CORZ', 'NVO']);
+const VALID_TICKER = /^[A-Z][A-Z0-9.-]{0,14}$/;
 const cache = new Map();
 const finite = value => typeof value === 'number' && Number.isFinite(value) ? value : null;
 
@@ -11,7 +11,7 @@ export function normalizeChart(ticker, payload) {
   const rows = timestamps.map((time, i) => ({time, close: finite(bars?.close?.[i]), high: finite(bars?.high?.[i]), low: finite(bars?.low?.[i]), volume: finite(bars?.volume?.[i])})).filter(row => row.close !== null);
   const last = rows.at(-1);
   const price = finite(meta.regularMarketPrice) ?? last?.close;
-  const previousClose = finite(meta.previousClose) ?? finite(meta.chartPreviousClose);
+  const previousClose = finite(meta.previousClose) ?? rows.at(-2)?.close ?? finite(meta.chartPreviousClose);
   if (!price || !previousClose || !last) throw Error('Incomplete quote');
   const quoteTime = finite(meta.regularMarketTime) ?? last.time;
   const baseline = rows.filter(row => row.time < last.time).slice(-20);
@@ -19,10 +19,11 @@ export function normalizeChart(ticker, payload) {
   const average = volumes.length === 20 ? volumes.reduce((a,b) => a+b, 0)/20 : null;
   const lows = baseline.map(row => row.low).filter(v => v !== null);
   const highs = baseline.map(row => row.high).filter(v => v !== null);
-  const history = rows.slice(-60).map(row => ({date:new Date(row.time*1000).toISOString().slice(0,10), close:row.close, high:row.high, low:row.low, volume:row.volume}));
+  const history = rows.slice(-260).map(row => ({date:new Date(row.time*1000).toISOString().slice(0,10), close:row.close, high:row.high, low:row.low, volume:row.volume}));
   const structure = levels(rows, price);
+  const trends = trendPeriods(rows, price);
   return {
-    ticker, history, structure, historyTimestamp:history.at(-1)?.date ?? null, technicalMethod:'Eelmise 20 ja kuni 60 kauplemispäeva kõrgeimad ja madalaimad hinnad', latest: {close:price, date:new Date(quoteTime*1000).toISOString().slice(0,10), high:finite(meta.regularMarketDayHigh) ?? last.high, low:finite(meta.regularMarketDayLow) ?? last.low, volume:finite(meta.regularMarketVolume) ?? last.volume},
+    ticker, history, structure, trends, securityName:meta.longName || meta.shortName || ticker, sector:null, historyTimestamp:history.at(-1)?.date ?? null, technicalMethod:'Eelmise 20 ja kuni 60 kauplemispäeva kõrgeimad ja madalaimad hinnad', latest: {close:price, date:new Date(quoteTime*1000).toISOString().slice(0,10), high:finite(meta.regularMarketDayHigh) ?? last.high, low:finite(meta.regularMarketDayLow) ?? last.low, volume:finite(meta.regularMarketVolume) ?? last.volume},
     previousClose, changePct:(price/previousClose-1)*100,
     volumeRatio:average && (finite(meta.regularMarketVolume) ?? last.volume) !== null ? (finite(meta.regularMarketVolume) ?? last.volume)/average : null,
     range20:lows.length === 20 && highs.length === 20 ? {low:Math.min(...lows),high:Math.max(...highs)} : null,
@@ -48,11 +49,17 @@ export function levels(rows, price) {
     change20:window[0]?.close ? (price/window[0].close-1)*100 : null};
 }
 
+export function trendPeriods(rows, price) {
+  const prior=rows.filter(r=>r.close !== null);
+  const change=(sessions)=>prior.length>sessions && prior.at(-sessions-1)?.close>0 ? (price/prior.at(-sessions-1).close-1)*100 : null;
+  return {short:change(5), medium:change(20), long:change(120)};
+}
+
 async function fetchQuote(ticker) {
   let failure;
   for (const host of ['query1.finance.yahoo.com', 'query2.finance.yahoo.com']) {
     try {
-      const url = `https://${host}/v8/finance/chart/${ticker}?range=3mo&interval=1d&includePrePost=false`;
+      const url = `https://${host}/v8/finance/chart/${ticker}?range=1y&interval=1d&includePrePost=false`;
       const response = await fetch(url, {signal:AbortSignal.timeout(12000), headers:{'User-Agent':'Mozilla/5.0', 'Accept':'application/json'}});
       if (!response.ok) throw Error(`Provider HTTP ${response.status}`);
       return normalizeChart(ticker, await response.json());
@@ -63,11 +70,12 @@ async function fetchQuote(ticker) {
 
 export default async function handler(req, res) {
   const ticker = String(req.query?.ticker ?? new URL(req.url, 'http://localhost').searchParams.get('ticker') ?? '').toUpperCase();
-  if (!TICKERS.has(ticker)) return res.status(400).json({error:'Tundmatu aktsiasümbol'});
+  if (!VALID_TICKER.test(ticker)) return res.status(400).json({error:'Vigane aktsiasümbol'});
   const saved = cache.get(ticker);
   if (saved && Date.now() - saved.fetched < 60000) return res.status(200).json(saved.data);
   try {
     const data = await fetchQuote(ticker);
+    if (cache.size >= 100) cache.delete(cache.keys().next().value);
     cache.set(ticker, {data, fetched:Date.now()});
     res.setHeader('Cache-Control', 'public, s-maxage=60, stale-while-revalidate=300');
     return res.status(200).json(data);
