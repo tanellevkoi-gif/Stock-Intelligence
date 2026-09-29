@@ -19,8 +19,10 @@ export function normalizeChart(ticker, payload) {
   const average = volumes.length === 20 ? volumes.reduce((a,b) => a+b, 0)/20 : null;
   const lows = baseline.map(row => row.low).filter(v => v !== null);
   const highs = baseline.map(row => row.high).filter(v => v !== null);
+  const history = rows.slice(-60).map(row => ({date:new Date(row.time*1000).toISOString().slice(0,10), close:row.close, high:row.high, low:row.low, volume:row.volume}));
+  const structure = levels(rows, price);
   return {
-    ticker, latest: {close:price, date:new Date(quoteTime*1000).toISOString().slice(0,10), high:finite(meta.regularMarketDayHigh) ?? last.high, low:finite(meta.regularMarketDayLow) ?? last.low, volume:finite(meta.regularMarketVolume) ?? last.volume},
+    ticker, history, structure, latest: {close:price, date:new Date(quoteTime*1000).toISOString().slice(0,10), high:finite(meta.regularMarketDayHigh) ?? last.high, low:finite(meta.regularMarketDayLow) ?? last.low, volume:finite(meta.regularMarketVolume) ?? last.volume},
     previousClose, changePct:(price/previousClose-1)*100,
     volumeRatio:average && (finite(meta.regularMarketVolume) ?? last.volume) !== null ? (finite(meta.regularMarketVolume) ?? last.volume)/average : null,
     range20:lows.length === 20 && highs.length === 20 ? {low:Math.min(...lows),high:Math.max(...highs)} : null,
@@ -28,11 +30,29 @@ export function normalizeChart(ticker, payload) {
   };
 }
 
+
+// Observed prior-session extremes are conditional reference levels, not targets.
+export function levels(rows, price) {
+  const prior = rows.slice(0,-1).filter(r => r.high !== null && r.low !== null).slice(-60);
+  const window = prior.slice(-20);
+  if (window.length < 10) return null;
+  const high20 = Math.max(...window.map(r => r.high));
+  const low20 = Math.min(...window.map(r => r.low));
+  const high60 = Math.max(...prior.map(r => r.high));
+  const low60 = Math.min(...prior.map(r => r.low));
+  const supports = [...new Set([low20, low60].filter(v => v < price))].sort((a,b)=>b-a);
+  const resistances = [...new Set([high20, high60].filter(v => v > price))].sort((a,b)=>a-b);
+  return {support:supports[0] ?? null, resistance:resistances[0] ?? null,
+    lowerSupport:supports[1] ?? null, upperResistance:resistances[1] ?? null,
+    rangeLow:low20, rangeHigh:high20,
+    change20:window[0]?.close ? (price/window[0].close-1)*100 : null};
+}
+
 async function fetchQuote(ticker) {
   let failure;
   for (const host of ['query1.finance.yahoo.com', 'query2.finance.yahoo.com']) {
     try {
-      const url = `https://${host}/v8/finance/chart/${ticker}?range=2mo&interval=1d&includePrePost=false`;
+      const url = `https://${host}/v8/finance/chart/${ticker}?range=3mo&interval=1d&includePrePost=false`;
       const response = await fetch(url, {signal:AbortSignal.timeout(12000), headers:{'User-Agent':'Mozilla/5.0', 'Accept':'application/json'}});
       if (!response.ok) throw Error(`Provider HTTP ${response.status}`);
       return normalizeChart(ticker, await response.json());

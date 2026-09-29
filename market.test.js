@@ -15,3 +15,9 @@ for (const ticker of ['IREN','CORZ','NVO']) {
     assert.ok(result.dataTimestamp);
   });
 }
+
+test('history and levels are derived from prior observed bars', () => {
+  const now=Math.floor(Date.now()/1000),ticker='IREN';
+  const payload={chart:{result:[{meta:{symbol:ticker,regularMarketPrice:12,previousClose:11,regularMarketTime:now},timestamp:Array.from({length:30},(_,i)=>now-(29-i)*86400),indicators:{quote:[{close:Array(30).fill(10),high:Array(30).fill(13),low:Array(30).fill(9),volume:Array(30).fill(100)}]}}]}};
+  const d=normalizeChart(ticker,payload);assert.equal(d.history.length,30);assert.equal(d.structure.support,9);assert.equal(d.structure.resistance,13);
+});

@@ -1,0 +1,3 @@
+import {test} from 'node:test';import {strict as assert} from 'node:assert';import {normalizeMacro} from './macro.js';
+test('index quote uses previous daily close when metadata omits it',()=>{const d=normalizeMacro('nasdaq',{chart:{result:[{meta:{regularMarketPrice:105,regularMarketTime:1760000000},indicators:{quote:[{close:[99,100,105]}]}}]}});assert.equal(d.value,105);assert.ok(Math.abs(d.changePct-5)<1e-9);assert.ok(d.timestamp)});
+test('Treasury yield remains in percent units',()=>{const d=normalizeMacro('yield10',{chart:{result:[{meta:{regularMarketPrice:5.268,previousClose:5.2,regularMarketTime:1760000000}}]}});assert.equal(d.value,5.268)});
