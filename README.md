@@ -1,15 +1,5 @@
 # Vaalavaade
 
-A small, personal dashboard for IREN, CORZ, and NVO. Daily close, volume compared to the previous 20 trading days, and historical 20-day price range. These are activity proxies, not evidence of a particular investor's trades.
+Simple Estonian market view for IREN, CORZ and NVO. The Vercel serverless function at `api/market.js` fetches the latest available Yahoo Finance chart quote, daily change, prior close, day high/low, volume and timestamp. The existing volume and historical range comparisons are shown when enough daily bars are available.
 
-## Run locally
-
-Install Node.js 20 or later. Run `npm run dev` and open http://localhost:3000. No API key or install step is needed.
-
-## Publish
-
-Create a new GitHub repository, put these project files at its root, then import the repository as a new Vercel project. Vercel recognizes `api/market.js` as a serverless function and serves the root static files. No build command or environment variables are required. Use Vercel Hobby only for permitted personal, noncommercial use.
-
-## Data and limitations
-
-The server requests Stooq daily CSV on demand, caching successful responses for 15 minutes. Availability and symbol coverage may change; if unavailable, the page displays an error instead of fabricated data. The latest daily bar is not an intraday live quote. The provider's adjusted/unadjusted treatment should be checked before using these bars for research across corporate actions. No dark-pool, Level 2, options-flow, or institutional position feed is included. Before making decisions, verify any figure with an exchange or broker source.
+Run locally with Node.js 20 or later: `npm run dev`. Run checks with `npm test`. Deploy the repository root to Vercel without a build command or API key. The provider can delay, rate limit or change availability. A previously successful response is marked stale if a later provider request fails; otherwise the function returns a clear error. Quote timestamps are from the data provider, not the time of page load. These quotes are not a live order book.

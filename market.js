@@ -1,28 +1,60 @@
 const TICKERS = new Set(['IREN', 'CORZ', 'NVO']);
-export function parseCsv(input) {
-  const rows = input.trim().split(/\r?\n/).slice(1).map(line => {
-    const [date, open, high, low, close, volume] = line.split(',');
-    return { date, open:+open, high:+high, low:+low, close:+close, volume:+volume };
-  }).filter(r => /^\d{4}-\d{2}-\d{2}$/.test(r.date) && Number.isFinite(r.close) && r.close>0 && Number.isFinite(r.volume) && r.volume>=0);
-  return rows.sort((a,b)=>a.date.localeCompare(b.date));
+const cache = new Map();
+const finite = value => typeof value === 'number' && Number.isFinite(value) ? value : null;
+
+export function normalizeChart(ticker, payload) {
+  const chart = payload?.chart?.result?.[0];
+  const meta = chart?.meta;
+  if (!meta || meta.symbol?.toUpperCase() !== ticker) throw Error('Invalid quote');
+  const bars = chart.indicators?.quote?.[0];
+  const timestamps = chart.timestamp || [];
+  const rows = timestamps.map((time, i) => ({time, close: finite(bars?.close?.[i]), high: finite(bars?.high?.[i]), low: finite(bars?.low?.[i]), volume: finite(bars?.volume?.[i])})).filter(row => row.close !== null);
+  const last = rows.at(-1);
+  const price = finite(meta.regularMarketPrice) ?? last?.close;
+  const previousClose = finite(meta.previousClose) ?? finite(meta.chartPreviousClose);
+  if (!price || !previousClose || !last) throw Error('Incomplete quote');
+  const quoteTime = finite(meta.regularMarketTime) ?? last.time;
+  const baseline = rows.filter(row => row.time < last.time).slice(-20);
+  const volumes = baseline.map(row => row.volume).filter(v => v !== null);
+  const average = volumes.length === 20 ? volumes.reduce((a,b) => a+b, 0)/20 : null;
+  const lows = baseline.map(row => row.low).filter(v => v !== null);
+  const highs = baseline.map(row => row.high).filter(v => v !== null);
+  return {
+    ticker, latest: {close:price, date:new Date(quoteTime*1000).toISOString().slice(0,10), high:finite(meta.regularMarketDayHigh) ?? last.high, low:finite(meta.regularMarketDayLow) ?? last.low, volume:finite(meta.regularMarketVolume) ?? last.volume},
+    previousClose, changePct:(price/previousClose-1)*100,
+    volumeRatio:average && (finite(meta.regularMarketVolume) ?? last.volume) !== null ? (finite(meta.regularMarketVolume) ?? last.volume)/average : null,
+    range20:lows.length === 20 && highs.length === 20 ? {low:Math.min(...lows),high:Math.max(...highs)} : null,
+    dataTimestamp:new Date(quoteTime*1000).toISOString(), retrievedAt:new Date().toISOString(), source:'Yahoo Finance chart', sourceUrl:`https://finance.yahoo.com/quote/${ticker}/`
+  };
 }
-export function summarize(rows, ticker) {
-  if(rows.length<22) throw new Error('Not enough daily history');
-  const latest=rows.at(-1), prior=rows.at(-2), baseline=rows.slice(-21,-1);
-  const avg=baseline.reduce((s,r)=>s+r.volume,0)/baseline.length;
-  return {ticker, latest, previousClose:prior.close, changePct:((latest.close/prior.close)-1)*100, volumeRatio:avg?latest.volume/avg:null,
-    range20:{low:Math.min(...baseline.map(r=>r.low)),high:Math.max(...baseline.map(r=>r.high))},
-    source:'Stooq daily CSV', sourceUrl:`https://stooq.com/q/d/?s=${ticker.toLowerCase()}.us&i=d`, retrievedAt:new Date().toISOString(),
-    note:'Daily end-of-day bars. Volume is activity, not proof of institutional buying or selling.'};
+
+async function fetchQuote(ticker) {
+  let failure;
+  for (const host of ['query1.finance.yahoo.com', 'query2.finance.yahoo.com']) {
+    try {
+      const url = `https://${host}/v8/finance/chart/${ticker}?range=2mo&interval=1d&includePrePost=false`;
+      const response = await fetch(url, {signal:AbortSignal.timeout(12000), headers:{'User-Agent':'Mozilla/5.0', 'Accept':'application/json'}});
+      if (!response.ok) throw Error(`Provider HTTP ${response.status}`);
+      return normalizeChart(ticker, await response.json());
+    } catch (error) { failure = error; }
+  }
+  throw failure;
 }
-export default async function handler(req,res) {
-  const ticker=String(req.query?.ticker || new URL(req.url,'http://localhost').searchParams.get('ticker') || '').toUpperCase();
-  res.setHeader('Cache-Control','public, s-maxage=900, stale-while-revalidate=3600');
-  if(!TICKERS.has(ticker)) return res.status(400).json({error:'Unsupported ticker'});
+
+export default async function handler(req, res) {
+  const ticker = String(req.query?.ticker ?? new URL(req.url, 'http://localhost').searchParams.get('ticker') ?? '').toUpperCase();
+  if (!TICKERS.has(ticker)) return res.status(400).json({error:'Tundmatu aktsiasümbol'});
+  const saved = cache.get(ticker);
+  if (saved && Date.now() - saved.fetched < 60000) return res.status(200).json(saved.data);
   try {
-    const upstream=await fetch(`https://stooq.com/q/d/l/?s=${ticker.toLowerCase()}.us&i=d`,{signal:AbortSignal.timeout(9000),headers:{'User-Agent':'Mozilla/5.0 (personal market dashboard)'}});
-    if(!upstream.ok) throw Error(`Upstream ${upstream.status}`);
-    const rows=parseCsv(await upstream.text());
-    res.status(200).json(summarize(rows,ticker));
-  } catch(e) { res.setHeader('Cache-Control','no-store'); res.status(503).json({error:'Market data temporarily unavailable. Try again later.'}); }
+    const data = await fetchQuote(ticker);
+    cache.set(ticker, {data, fetched:Date.now()});
+    res.setHeader('Cache-Control', 'public, s-maxage=60, stale-while-revalidate=300');
+    return res.status(200).json(data);
+  } catch (error) {
+    console.error('Market data failed', ticker, error.message);
+    res.setHeader('Cache-Control', 'no-store');
+    if (saved) return res.status(200).json({...saved.data, stale:true});
+    return res.status(503).json({error:'Andmed pole praegu saadaval. Proovi mõne aja pärast uuesti.'});
+  }
 }

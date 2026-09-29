@@ -11,13 +11,13 @@ async function load(ticker){
     if(!response.ok)throw Error('Andmed pole praegu saadaval. Proovi mõne aja pärast uuesti.');
     const d=await response.json();if(current!==requestId)return;
     $('price').textContent=money(d.latest.close);$('change').textContent=`${d.changePct>=0?'+':''}${d.changePct.toFixed(2)}% võrreldes eelmise sulgemisega`;
-    $('change').className=d.changePct>=0?'up':'down';$('date').textContent=`${d.ticker} · ${d.latest.date}`;
+    $('change').className=d.changePct>=0?'up':'down';$('date').textContent=`${d.ticker} · ${new Date(d.dataTimestamp).toLocaleString('et-EE',{timeZone:'Europe/Tallinn'})} · Eelmine sulgemine ${money(d.previousClose)} · Päeva kõrgeim/madalaim ${d.latest.high == null || d.latest.low == null ? 'puudub' : money(d.latest.high)+' / '+money(d.latest.low)}`;
     $('volume').textContent=number(d.latest.volume);$('volumeText').textContent='Viimase saadaoleva kauplemispäeva aktsiate arv.';
     $('ratio').textContent=d.volumeRatio===null?'Puudub':d.volumeRatio.toFixed(2)+'×';
-    $('range').textContent=`${money(d.range20.low)}–${money(d.range20.high)}`;
+    $('range').textContent=d.range20?`${money(d.range20.low)}–${money(d.range20.high)}`:'Puudub';
     $('reading').textContent=d.volumeRatio===null?'Mahu võrdlus puudub.':d.volumeRatio>=1.5?'Päevamaht ületas 20 päeva keskmist vähemalt 1,5 korda. Uuri sama päeva uudiseid ja hinnaliikumist; maht üksi ei näita, kes ostis.':`Päevamaht oli ${d.volumeRatio.toFixed(2)} korda eelneva 20 päeva keskmine. Üksnes selle näitaja järgi ei saa vaalategevust kinnitada.`;
     $('source').href=d.sourceUrl;$('retrieved').textContent=new Date(d.retrievedAt).toLocaleString('et-EE',{timeZone:'Europe/Tallinn'});
-    $('status').textContent='';$('result').hidden=false;
+    $('status').textContent=d.stale?'Andmeallikas pole hetkel saadaval; kuvatakse viimast salvestatud vastust.':'';$('result').hidden=false;
   }catch(e){if(current!==requestId)return;$('status').textContent=e.message}
 }
 document.querySelectorAll('[data-ticker]').forEach(b=>b.addEventListener('click',()=>load(b.dataset.ticker)));
