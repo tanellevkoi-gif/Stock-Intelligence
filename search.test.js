@@ -1,0 +1,3 @@
+import {test} from 'node:test';import {strict as assert} from 'node:assert';import handler,{cleanResults} from './search.js';
+test('company search results include only valid equity symbols',()=>{const r=cleanResults({quotes:[{symbol:'NVDA',shortname:'NVIDIA',exchange:'NMS',quoteType:'EQUITY'},{symbol:'^GSPC',quoteType:'INDEX'},{symbol:'BAD/INPUT',quoteType:'EQUITY'}]});assert.deepEqual(r,[{ticker:'NVDA',name:'NVIDIA',exchange:'NMS'}])});
+test('invalid search input is rejected without requesting a provider',async()=>{const res={status(c){this.code=c;return this},json(d){this.data=d;return this}};await handler({query:{q:'<script>'}},res);assert.equal(res.code,400);assert.match(res.data.error,/Sisesta/)});
